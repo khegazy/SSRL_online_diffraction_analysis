@@ -543,7 +543,7 @@ class diffractionCLASS():
       print("ERROR: Must specify dSet or dataX and dataY for get_accuracy!!!")
       raise RuntimeError
 
-    return sess.run([self.predictions], feed_dict)
+    return sess.run([self.qualityPred, self.flt1Pred, self.flt2Pred], feed_dict)
 
 
   #############################################################################
