@@ -119,6 +119,8 @@ class diffractionCLASS():
       self.initialize_optimization()
 
     # Save History
+    #self.modelRestored  = False
+    self.hasTrained     = False
     self._lastSaved     = collections.defaultdict(None)
     self.history        = collections.defaultdict(list)
     self.saver          = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
@@ -155,8 +157,8 @@ class diffractionCLASS():
     
     outDataX         = self.data[dSet+"_X"][minInd:maxInd]
     outDataY_quality = self.data[dSet+"_Y"][minInd:maxInd,0].astype(np.int32)
-    outDataY_flt1    = np.reshape(self.data[dSet+"_Y"][minInd:maxInd,1], (Nsamples,1))
-    outDataY_flt2    = np.reshape(self.data[dSet+"_Y"][minInd:maxInd,2], (Nsamples,1))
+    outDataY_flt1    = np.reshape(self.data[dSet+"_Y"][minInd:maxInd,1], (-1,1))
+    outDataY_flt2    = np.reshape(self.data[dSet+"_Y"][minInd:maxInd,2], (-1,1))
 
     return outDataX, outDataY_quality, outDataY_flt1, outDataY_flt2
 
@@ -168,7 +170,6 @@ class diffractionCLASS():
     Initialize all place holders with size variables from self.config
     """
 
-    print("SIZE: ",self.Nrowcol)
     self.inputX = tf.placeholder(name="inputFeatures", dtype=tf.float32,
                              shape=[None, self.Nrowcol, self.Nrowcol, 1])
     self.inputY_quality = tf.placeholder(name="inputQualityLabels", dtype=tf.int32,
@@ -241,16 +242,19 @@ class diffractionCLASS():
       self.qualityLoss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                             logits=self.qualityPred,
                             labels=self.inputY_quality))
+      tf.summary.scalar("qualityLoss", self.qualityLoss)
 
       # float1 loss
       self.flt1Loss    = tf.losses.mean_squared_error(
                             predictions=self.flt1Pred,
                             labels=self.inputY_flt1)
+      tf.summary.scalar("flt1Loss", self.flt1Loss)
 
       # float2 loss
       self.flt2Loss    = tf.losses.mean_squared_error(
                             predictions=self.flt2Pred,
                             labels=self.inputY_flt2)
+      tf.summary.scalar("flt2Loss", self.flt2Loss)
 
       self.loss = self.qualityLoss + self.flt1Loss + self.flt2Loss
 
@@ -281,8 +285,9 @@ class diffractionCLASS():
                           )
                         )
 
+
   #############################################################################
-  def run_train_step(self, sess, batch):
+  def run_train_step(self, sess, batch, summaryWriter):
 
     # Build feed dictionary
     input_feed = { 
@@ -293,10 +298,13 @@ class diffractionCLASS():
       self.isTraining : True}
 
     # Output feed
-    output_feed = [self.loss, self.global_step, self.update]
+    output_feed = [self.loss, self.global_step, self.summaries, self.update]
 
     # Run train step
-    loss, global_step, _ = sess.run(output_feed, input_feed) 
+    loss, global_step, summaries, _ = sess.run(output_feed, input_feed) 
+
+    # All summaries in the graph are added to Tensorboard
+    summaryWriter.add_summary(summaries, global_step)
 
     return loss, global_step
 
@@ -321,8 +329,14 @@ class diffractionCLASS():
     logging.info("/////  BEGIN TRAINING  /////")
     logging.info("////////////////////////////")
 
-    sess.run(tf.global_variables_initializer())
-    sess.run(tf.local_variables_initializer())
+    # for TensorBoard
+    summaryWriter = tf.summary.FileWriter(
+        "./checkpoints/", 
+        sess.graph)
+
+    #if not (self.modelRestored or self.hasTrained):
+    #  sess.run(tf.global_variables_initializer())
+    #  sess.run(tf.local_variables_initializer())
 
     # Print number of model parameters
     tic = time.time()
@@ -355,9 +369,7 @@ class diffractionCLASS():
 
         # Perform training step
         tstep_tic = time.time()
-        curLoss, global_step = self.run_train_step(sess, batch)
-        #global_step = 0
-        #curLoss = 0
+        curLoss, global_step = self.run_train_step(sess, batch, summaryWriter)
         tstep_toc = time.time()
         tstep_time = tstep_toc - tstep_tic
 
@@ -373,10 +385,13 @@ class diffractionCLASS():
         # Save model
         if global_step % self.FLAGS.save_every == 0:
           logging.info("Saving model at iteration {} to {}".format(
-                  global_step, self.FLAGS.checkpoint_path))
-          self.saver.save(sess, self.FLAGS.checkpoint_path, global_step=global_step)
-          self.saveTrainingHistory(fileName="checkpoints/trainingHistory-", 
-                  global_step=global_step)
+              global_step, self.FLAGS.checkpoint_path))
+          self.saver.save(sess, 
+              self.FLAGS.checkpoint_path + "/" + self.FLAGS.experiment_name, 
+              global_step=global_step)
+          self.saveTrainingHistory(
+              fileName=self.FLAGS.checkpoint_path + "/" + self.FLAGS.experiment_name, 
+              global_step=global_step)
 
         ###  Evaluate model  ###
         if global_step % self.FLAGS.eval_every == 0:
@@ -385,18 +400,21 @@ class diffractionCLASS():
           trainLoss = self.get_loss(sess, dSet="train")
           trainAccs = self.get_accuracy(sess, dSet="train")
 
+          self.writeSummary(trainLoss, "train/loss", summaryWriter, global_step)
+          self.writeSummary(trainAccs[0], "train/acc", summaryWriter, global_step)
           self.history["train"].append((global_step, trainLoss, trainAccs))
 
           # Evaluate validation data
           valLoss = self.get_loss(sess, dSet="val")
           valAccs = self.get_accuracy(sess, dSet="val")
 
+          self.writeSummary(valLoss, "val/loss", summaryWriter, global_step)
+          self.writeSummary(valAccs[0], "val/acc", summaryWriter, global_step)
           self.history["val"].append((global_step, valLoss, valAccs))
-          print("losses", trainLoss, valLoss)
 
           # Logging results
-          print_info = "Evaluation:\tTraining %.5f / %.5f / %.5f/ %.5f \tValidation %.5f / %.5f / %.5f / %.5f" %\
-              (trainLoss, trainAccs[0], trainAccs[1], trainAccs[2], valLoss, valAccs[0], valAccs[1], valAccs[2])
+          print_info = "%i\tTraining %.5f / %.5f / %.5f / %.5f \tValidation %.5f / %.5f / %.5f / %.5f" %\
+              (global_step, trainLoss, trainAccs[0], trainAccs[1], trainAccs[2], valLoss, valAccs[0], valAccs[1], valAccs[2])
           logging.info(print_info)
           print(print_info)
           if self.FLAGS.verbose:
@@ -408,16 +426,20 @@ class diffractionCLASS():
                     global_step, self.FLAGS.bestModel_loss_ckpt_path))
             best_val_loss = valLoss
             self.bestLossSaver.save(sess, 
-                    self.FLAGS.bestModel_loss_ckpt_path, global_step=global_step)
-            self.saveTrainingHistory(fileName="checkpoints/bestLoss/trainingHistory-", 
+                    self.FLAGS.bestModel_loss_ckpt_path + "/" + self.FLAGS.experiment_name, 
+                    global_step=global_step)
+            self.saveTrainingHistory(
+                    fileName=self.FLAGS.bestModel_loss_ckpt_path + "/" + self.FLAGS.experiment_name, 
                     global_step=global_step)
           if (best_val_acc is None) or (valAccs[0] > best_val_acc):
             logging.info("Saving best accuracy model at iteration {} in {}".format(
                     global_step, self.FLAGS.bestModel_acc_ckpt_path))
             best_val_acc = valAccs[0]
             self.bestAccSaver.save(sess, 
-                    self.FLAGS.bestModel_acc_ckpt_path, global_step=global_step)
-            self.saveTrainingHistory(fileName="checkpoints/bestAcc/trainingHistory-", 
+                    self.FLAGS.bestModel_acc_ckpt_path + "/" + self.FLAGS.experiment_name, 
+                    global_step=global_step)
+            self.saveTrainingHistory(
+                    fileName=self.FLAGS.bestModel_acc_ckpt_path + "/" + self.FLAGS.experiment_name, 
                     global_step=global_step)
 
 
@@ -500,7 +522,7 @@ class diffractionCLASS():
                   self.isTraining_placeHolder : False})
     """
 
-    feed_dict = {self.isTraining : True}
+    feed_dict = {self.isTraining : False}
 
     if (dataX is not None) and (dataY is not None):
       feed_dict[self.inputX] = dataX
@@ -593,6 +615,14 @@ class diffractionCLASS():
 
     return sess.run([self.loss], feed_dict)[0]
 
+  
+  #############################################################################
+  def writeSummary(self, value, tag, summaryWriter, global_step):
+    """Write a single summary value to tensorboard"""
+    summary = tf.Summary()
+    summary.value.add(tag=tag, simple_value=value)
+    summaryWriter.add_summary(summary, global_step)
+
 
   #############################################################################
   def saveTrainingHistory(self, fileName="", global_step=None):
@@ -601,9 +631,9 @@ class diffractionCLASS():
     """
 
     if global_step is not None: 
-      fullName = fileName + "history_" + str(global_step) + ".pl"
+      fullName = fileName + "_history_" + str(global_step) + ".pl"
     else:
-      fullName = fileName + "history.pl"
+      fullName = fileName + "_history.pl"
 
     if fileName in self._lastSaved.keys():
       os.remove(self._lastSaved[str(fileName)])
@@ -625,9 +655,25 @@ class diffractionCLASS():
     else:
       self.saver.save(self.sess, fileName)
 
-
+"""
   #############################################################################
-  def RestoreModel(self, fileName):
-    pass
+  def restoreModel(self, session, folderName, expect_exists=False, import_train_history=False):
+    print("folder",folderName)
 
+    ckpt = tf.train.get_checkpoint_state(folderName)
+    #ckpt = tf.train.get_checkpoint_state(folderName + "/" + self.FLAGS.experiment_name)
+    #print(ckpt)
+    #print(ckpt.model_checkpoint_path)
+    if ckpt:
+      self.saver.restore(session, ckpt.model_checkpoint_path)
+    else:
+      if expect_exists:
+        raise RuntimeError("ERROR: Cannot find saved checkpoint in %s" % folderName)
+      else:
+        print("Cannot find saved checkpoint at %s" % folderName)
 
+    if import_train_history:
+      pass
+
+    self.restoredModel = True
+"""

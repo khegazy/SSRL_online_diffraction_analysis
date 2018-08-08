@@ -34,7 +34,7 @@ def importData(dataDir):
   data = pd.read_csv(dataDir + "categories1.txt", 
       delim_whitespace=True, header=None)
 
-  Nsamples = 100 #len(data.loc[:,0])
+  Nsamples = 30 #len(data.loc[:,0])
   dataX = np.zeros((Nsamples, rebin, rebin, 1), dtype=np.float32)
   dataY = np.zeros((Nsamples, 3), dtype=np.float32)
   dataY[:,1:] = np.array((data.loc[:Nsamples-1,2:]).values, dtype=np.float32)
@@ -52,6 +52,36 @@ def importData(dataDir):
       sys.exit()
 
   return dataX, dataY
+
+
+
+#############################################################################
+def initializeModel(session, model, folderName, expect_exists=False, import_train_history=False):
+  print("folder",folderName)
+
+  ckpt = tf.train.get_checkpoint_state(folderName)
+  print("ckpt", ckpt)
+  #ckpt = tf.train.get_checkpoint_state(folderName + "/" + self.FLAGS.experime    nt_name)
+  v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
+  print("v2_path", v2_path)
+  if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
+      print "Reading model parameters from %s" % ckpt.model_checkpoint_path
+      model.saver.restore(session, ckpt.model_checkpoint_path)
+  else:
+    if expect_exists:
+      raise RuntimeError("ERROR: Cannot find saved checkpoint in %s" % folderName)
+    else:
+      print("Cannot find saved checkpoint at %s" % folderName)
+      session.run(tf.global_variables_initializer())
+      print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
+
+  session.run(tf.local_variables_initializer())
+
+  if import_train_history:
+    pass
+
+
+
 
 
 #####  Embedding  #####

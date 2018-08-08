@@ -1,6 +1,6 @@
 import tensorflow as tf
 import model as mdl
-from modules import importData
+from modules import *
 import numpy as np
 import random
 #from tensorflow.app.flags import DEFINE_integer as int_flag
@@ -16,8 +16,6 @@ tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
 tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
 tf.app.flags.DEFINE_string("experiment_name", "diffraction", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment.")
 tf.app.flags.DEFINE_integer("Nepochs", 0, "Number of epochs to train. 0 means train indefinitely.")
-tf.app.flags.DEFINE_integer("Nbatches", 100, "Number of batches to train for each epoch. 0 to calculate automatically.")
-tf.app.flags.DEFINE_integer("Nlayers", 2, "Number of layers for the embedding class")
 tf.app.flags.DEFINE_integer("print_every", 1000, "Print training statues every N batches")
 tf.app.flags.DEFINE_integer("eval_every", 1, "Print training statues every N batches")
 tf.app.flags.DEFINE_bool("verbose", True, "Print")
@@ -25,7 +23,6 @@ tf.app.flags.DEFINE_bool("verbose", True, "Print")
 # Hyperparameters
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use")
-tf.app.flags.DEFINE_integer("layer_size", 5, "Size of vector representation.")
 tf.app.flags.DEFINE_integer("embedding_size", 512, "Size of vector representation.")
 
 # Optimization
@@ -41,13 +38,12 @@ tf.app.flags.DEFINE_float("trainRatio", 0.70, "Ratio of the data that should be 
 tf.app.flags.DEFINE_float("valRatio", 0.15, "ratio of the data that should be used for validation")
 tf.app.flags.DEFINE_float("testRatio", 0.15, "ratio of the data that should be used for testing")
 tf.app.flags.DEFINE_integer("Nfeatures", 11, "Number of features per event") 
-tf.app.flags.DEFINE_integer("Noutputs", 1, "Number of logits to be predicted")
 
 # Saving
 tf.app.flags.DEFINE_integer("save_every", 5, "Save model parameters every N training steps")
-tf.app.flags.DEFINE_string("bestModel_loss_ckpt_path", "./checkpoints/bestLoss/checkpoint", "File name of the saved model with the best loss")
-tf.app.flags.DEFINE_string("bestModel_acc_ckpt_path", "./checkpoints/bestAcc/checkpoint", "File name of the saved model with the best accuracy")
-tf.app.flags.DEFINE_string("checkpoint_path", "./checkpoints/checkpoint", "File name of the saved checkpoint model")
+tf.app.flags.DEFINE_string("bestModel_loss_ckpt_path", "./checkpoints/bestLoss", "File name of the saved model with the best loss")
+tf.app.flags.DEFINE_string("bestModel_acc_ckpt_path", "./checkpoints/bestAcc", "File name of the saved model with the best accuracy")
+tf.app.flags.DEFINE_string("checkpoint_path", "./checkpoints", "File name of the saved checkpoint model")
 tf.app.flags.DEFINE_integer("keep", 1, "How many checkpoints to keep. 0 indicates keep all (you shouldn't need to do keep all though - it's very storage intensive).")
 
 FLAGS = tf.app.flags.FLAGS
@@ -95,4 +91,18 @@ data["test_Y"]    = dataY[randInds[ind2:],:]
 diffractionNet = mdl.diffractionCLASS(FLAGS, data)
 
 with tf.Session(config=tfConfig) as sess:
+  # Restore previously trained models
+
+  initializeModel(sess, diffractionNet, FLAGS.checkpoint_path, 
+      expect_exists=False)
+  #diffractionNet.restoreModel(sess, FLAGS.checkpoint_path,
+  #    import_train_history=True)
+
   diffractionNet.train(sess)
+
+
+
+
+
+
+
